@@ -1,0 +1,149 @@
+name: Container Build, Scan & Publish
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: "Name of the container image"
+        required: true
+        type: string
+      dockerfile-path:
+        description: "Path to Dockerfile (default: ./Dockerfile)"
+        required: false
+        type: string
+        default: "./Dockerfile"
+      build-context:
+        description: "Build context path (default: .)"
+        required: false
+        type: string
+        default: "."
+      image-tag:
+        description: "Tag for the image (default: auto-determined from branch)"
+        required: false
+        type: string
+        default: ""
+
+      # Azure Container Registry settings
+      acr-registry:
+        description: "Azure Container Registry name (e.g., myregistry.azurecr.io)"
+        required: true
+        type: string
+
+      # Security settings
+      trivy-severity:
+        description: "Trivy severity levels to check (default: CRITICAL,HIGH)"
+        required: false
+        type: string
+        default: "CRITICAL,HIGH"
+      fail-on-vulnerabilities:
+        description: "Fail workflow if vulnerabilities are found (default: true)"
+        required: false
+        type: boolean
+        default: true
+
+      # Build settings
+      build-args:
+        description: 'Docker build arguments as JSON object (e.g., {"KEY":"value"})'
+        required: false
+        type: string
+        default: "{}"
+
+    secrets:
+      client-id:
+        description: "Entra managed identity client ID"
+        required: true
+      tenant-id:
+        description: "Entra tenant ID"
+        required: true
+      subscription-id:
+        description: "Azure subscription ID"
+        required: true
+
+jobs:
+  build-scan-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine image tag
+        id: image-tag
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "${{ inputs.image-tag }}" ]; then
+            if [ "$GITHUB_REF" == "refs/heads/main" ] || [ "$GITHUB_REF" == "refs/heads/master" ]; then
+              TAG="latest"
+            else
+              TAG="$GITHUB_SHA"
+            fi
+          else
+            TAG="${{ inputs.image-tag }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $TAG"
+
+      - name: Build container image for scanning
+        id: build-image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.build-context }}
+          file: ${{ inputs.dockerfile-path }}
+          push: false
+          tags: ${{ inputs.acr-registry }}/${{ inputs.image-name }}:${{ steps.image-tag.outputs.tag }}-scan
+          build-args: ${{ inputs.build-args }}
+          outputs: type=docker,dest=/tmp/image.tar
+
+      - name: Run Trivy vulnerability scanner
+        id: trivy-scan
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: false
+        with:
+          input: /tmp/image.tar
+          # format: 'sarif'
+          # output: 'trivy-results.sarif'
+          format: "table"
+          severity: ${{ inputs.trivy-severity }}
+          exit-code: ${{ inputs.fail-on-vulnerabilities && '1' || '0' }}
+
+      - name: Fail if vulnerabilities found
+        if: inputs.fail-on-vulnerabilities && steps.trivy-scan.outcome == 'failure'
+        run: |
+          echo "Vulnerabilities found that exceed the severity threshold: ${{ inputs.trivy-severity }}"
+          exit 1
+
+      # only possible on public repositories or via GitHub Code Security purchase
+      # - name: Upload Trivy results to GitHub Security
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   if: always()
+      #   with:
+      #     sarif_file: "trivy-results.sarif"
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.client-id }}
+          tenant-id: ${{ secrets.tenant-id }}
+          subscription-id: ${{ secrets.subscription-id }}
+
+      - name: Log in to Azure Container Registry
+        run: az acr login --name ${{ inputs.acr-registry }}
+
+      - name: Publish container image to ACR
+        if: steps.trivy-scan.outcome == 'success' || (steps.trivy-scan.outcome == 'failure' && !inputs.fail-on-vulnerabilities)
+        run: |
+          docker load -i /tmp/image.tar
+          docker tag ${{ inputs.acr-registry }}/${{ inputs.image-name }}:${{ steps.image-tag.outputs.tag }}-scan ${{ inputs.acr-registry }}/${{ inputs.image-name }}:${{ steps.image-tag.outputs.tag }}
+          docker tag ${{ inputs.acr-registry }}/${{ inputs.image-name }}:${{ steps.image-tag.outputs.tag }}-scan ${{ inputs.acr-registry }}/${{ inputs.image-name }}:latest
+          docker push ${{ inputs.acr-registry }}/${{ inputs.image-name }}:${{ steps.image-tag.outputs.tag }}
+          docker push ${{ inputs.acr-registry }}/${{ inputs.image-name }}:latest

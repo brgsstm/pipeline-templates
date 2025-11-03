@@ -1,0 +1,9 @@
+FROM alpine:3.20
+
+# Install some basic packages for testing
+RUN apk add --no-cache \
+    curl \
+    bash \
+    && rm -rf /var/cache/apk/*
+
+WORKDIR /app
