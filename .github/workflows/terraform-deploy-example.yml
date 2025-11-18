@@ -1,0 +1,52 @@
+name: Example Terraform Deploy Infrastructure
+
+on:
+  push:
+    branches: [feature/terraform-apply]
+    paths:
+      - "examples/terraform-deploy/**"
+      - ".github/workflows/terraform-deploy-example.yml"
+      - ".github/workflows/terraform-deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  terraform-plan:
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    uses: brgsstm/pipeline-templates/.github/workflows/terraform-deploy.yml@feature/terraform-apply
+    with:
+      working-directory: "examples/terraform-deploy"
+      terraform-version: "1.13.5"
+      azure-resource-group: "shared-storage"
+      azure-storage-account: "iaccoresharedstgem22"
+      azure-container-name: "tf-state"
+      azure-key: "terraform-deploy-example/terraform.tfstate"
+      plan-only: true
+    secrets:
+      client-id: ${{ secrets.MI_CLIENT_ID }}
+      tenant-id: ${{ secrets.ENTRA_TENANT_ID }}
+      subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  terraform-apply:
+    needs: terraform-plan
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    uses: brgsstm/pipeline-templates/.github/workflows/terraform-deploy.yml@feature/terraform-apply
+    with:
+      working-directory: "examples/terraform-deploy"
+      terraform-version: "1.13.5"
+      azure-resource-group: "shared-storage"
+      azure-storage-account: "iaccoresharedstgem22"
+      azure-container-name: "tf-state"
+      azure-key: "terraform-deploy-example/terraform.tfstate"
+      plan-only: false
+      auto-approve: true
+    secrets:
+      client-id: ${{ secrets.MI_CLIENT_ID }}
+      tenant-id: ${{ secrets.ENTRA_TENANT_ID }}
+      subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
