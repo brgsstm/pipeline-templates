@@ -1,4 +1,4 @@
-name: Build and Publish Function App Artifact
+name: Example Publish Azure Python Function App Artifact
 
 on:
   push:

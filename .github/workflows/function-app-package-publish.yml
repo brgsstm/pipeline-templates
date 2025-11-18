@@ -1,4 +1,4 @@
-name: Function App Package & Publish
+name: Publish Azure Python Function App Artifact
 
 on:
   workflow_call:

@@ -1,4 +1,4 @@
-name: Example Container Build
+name: Example Container Build, Scan & Publish
 
 on:
   push:
