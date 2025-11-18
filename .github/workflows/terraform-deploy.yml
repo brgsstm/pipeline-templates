@@ -1,0 +1,205 @@
+name: Terraform Deploy Infrastructure
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Path to Terraform working directory (default: .)"
+        required: false
+        type: string
+        default: "."
+      terraform-version:
+        description: "Terraform version to use (default: latest)"
+        required: false
+        type: string
+        default: "latest"
+      
+      # Azure backend configuration
+      azure-resource-group:
+        description: "Azure resource group for Terraform state backend"
+        required: true
+        type: string
+      azure-storage-account:
+        description: "Azure storage account for Terraform state backend"
+        required: true
+        type: string
+      azure-container-name:
+        description: "Azure storage container for Terraform state backend"
+        required: true
+        type: string
+      azure-key:
+        description: "State file key in Azure storage (default: terraform.tfstate)"
+        required: false
+        type: string
+        default: "terraform.tfstate"
+      
+      # Variable files
+      var-files:
+        description: "Comma-separated list of variable files (e.g., terraform.tfvars,prod.tfvars)"
+        required: false
+        type: string
+        default: ""
+      variables:
+        description: 'Terraform variables as JSON object (e.g., {"environment":"prod","region":"eastus"})'
+        required: false
+        type: string
+        default: "{}"
+      
+      # Execution mode
+      plan-only:
+        description: "Only run terraform plan, do not apply (default: true)"
+        required: false
+        type: boolean
+        default: true
+      auto-approve:
+        description: "Auto-approve terraform apply (default: false)"
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      client-id:
+        description: "Entra managed identity client ID"
+        required: true
+      tenant-id:
+        description: "Entra tenant ID"
+        required: true
+      subscription-id:
+        description: "Azure subscription ID"
+        required: true
+
+jobs:
+  terraform-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.client-id }}
+          tenant-id: ${{ secrets.tenant-id }}
+          subscription-id: ${{ secrets.subscription-id }}
+
+      - name: Terraform Init
+        id: terraform-init
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          # Configure Azure backend
+          INIT_ARGS="-backend-config=resource_group_name=${{ inputs.azure-resource-group }}"
+          INIT_ARGS="${INIT_ARGS} -backend-config=storage_account_name=${{ inputs.azure-storage-account }}"
+          INIT_ARGS="${INIT_ARGS} -backend-config=container_name=${{ inputs.azure-container-name }}"
+          INIT_ARGS="${INIT_ARGS} -backend-config=key=${{ inputs.azure-key }}"
+          
+          echo "Running: terraform init ${INIT_ARGS}"
+          terraform init ${INIT_ARGS}
+
+      - name: Terraform Format Check
+        id: terraform-format
+        working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
+        run: |
+          terraform fmt -check -recursive
+          echo "exit-code=$?" >> $GITHUB_OUTPUT
+
+      - name: Terraform Validate
+        id: terraform-validate
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          terraform validate
+
+      - name: Terraform Plan
+        id: terraform-plan
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          PLAN_ARGS=""
+          
+          # Add variable files
+          if [ -n "${{ inputs.var-files }}" ]; then
+            IFS=',' read -ra VAR_FILES <<< "${{ inputs.var-files }}"
+            for var_file in "${VAR_FILES[@]}"; do
+              var_file=$(echo "$var_file" | xargs) # trim whitespace
+              if [ -f "$var_file" ]; then
+                PLAN_ARGS="${PLAN_ARGS} -var-file=${var_file}"
+              else
+                echo "Warning: Variable file not found: $var_file"
+              fi
+            done
+          fi
+          
+          # Add variables from JSON
+          if [ "${{ inputs.variables }}" != "{}" ]; then
+            while IFS= read -r line; do
+              PLAN_ARGS="${PLAN_ARGS} ${line}"
+            done < <(echo "${{ inputs.variables }}" | jq -r 'to_entries[] | "-var=\(.key)=\(.value)"')
+          fi
+          
+          # Create plan file
+          PLAN_FILE="tfplan-${GITHUB_SHA:0:7}.out"
+          echo "plan-file=${PLAN_FILE}" >> $GITHUB_OUTPUT
+          
+          echo "Running: terraform plan -out=${PLAN_FILE} ${PLAN_ARGS}"
+          terraform plan -out="${PLAN_FILE}" ${PLAN_ARGS}
+          
+          # Show plan summary
+          terraform show -json "${PLAN_FILE}" | jq -r '
+            if .resource_changes then
+              (if (.resource_changes | map(select(.change.actions | index("create"))) | length) > 0 then
+                "**Resources to add:** \(.resource_changes | map(select(.change.actions | index("create"))) | length)\n"
+              else "" end) +
+              (if (.resource_changes | map(select(.change.actions | index("update"))) | length) > 0 then
+                "**Resources to change:** \(.resource_changes | map(select(.change.actions | index("update"))) | length)\n"
+              else "" end) +
+              (if (.resource_changes | map(select(.change.actions | index("delete"))) | length) > 0 then
+                "**Resources to destroy:** \(.resource_changes | map(select(.change.actions | index("delete"))) | length)\n"
+              else "" end) |
+              if . == "" then "No changes detected." else "## Terraform Plan Summary\n" + . end
+            else
+              "No changes detected."
+            end
+          ' >> $GITHUB_STEP_SUMMARY || echo "## Terraform Plan Summary\nPlan completed. Review the plan output above for details." >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        id: terraform-apply
+        if: ${{ !inputs.plan-only }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          PLAN_FILE="${{ steps.terraform-plan.outputs.plan-file }}"
+          
+          if [ ! -f "${PLAN_FILE}" ]; then
+            echo "Error: Plan file not found: ${PLAN_FILE}"
+            exit 1
+          fi
+          
+          APPLY_ARGS=""
+          if [ "${{ inputs.auto-approve }}" == "true" ]; then
+            APPLY_ARGS="-auto-approve"
+          fi
+          
+          echo "Running: terraform apply ${APPLY_ARGS} ${PLAN_FILE}"
+          terraform apply ${APPLY_ARGS} "${PLAN_FILE}"
+          
+          echo "## Terraform Apply Completed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Infrastructure has been deployed using the plan: ${PLAN_FILE}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Output
+        if: ${{ !inputs.plan-only }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "## Terraform Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          terraform output >> $GITHUB_STEP_SUMMARY || echo "No outputs defined" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
