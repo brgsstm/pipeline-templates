@@ -18,7 +18,7 @@ jobs:
     uses: brgsstm/pipeline-templates/.github/workflows/terraform-deploy.yml@feature/terraform-apply
     with:
       working-directory: "examples/terraform-deploy"
-      terraform-version: "1.13.5"
+      terraform-version: "1.12.2"
       plan-only: true
     secrets:
       client-id: ${{ secrets.MI_CLIENT_ID }}

@@ -13,6 +13,6 @@ provider "azurerm" {
 }
 
 resource "azurerm_resource_group" "example" {
-  name     = "example-rgrp"
+  name     =  "example-rgrp"
   location = "West Europe"
 }
