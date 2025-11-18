@@ -37,6 +37,11 @@ on:
         required: false
         type: boolean
         default: false
+      environment:
+        description: "Environment name for approval (required, requires environment with protection rules)"
+        required: true
+        type: string
+        default: "production"
 
     secrets:
       client-id:
@@ -50,12 +55,15 @@ on:
         required: true
 
 jobs:
-  terraform-deploy:
+  terraform-plan:
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
       id-token: write
+    outputs:
+      plan-file: ${{ steps.terraform-plan.outputs.plan-file }}
+      has-changes: ${{ steps.terraform-plan.outputs.has-changes }}
 
     steps:
       - name: Checkout repository
@@ -127,8 +135,18 @@ jobs:
           echo "Running: terraform plan -out=${PLAN_FILE} ${PLAN_ARGS}"
           terraform plan -out="${PLAN_FILE}" ${PLAN_ARGS}
           
-          # Show plan summary
-          terraform show -json "${PLAN_FILE}" | jq -r '
+          # Show plan summary and check for changes
+          PLAN_JSON=$(terraform show -json "${PLAN_FILE}")
+          HAS_CHANGES="false"
+          
+          if echo "$PLAN_JSON" | jq -e '.resource_changes | length > 0' > /dev/null 2>&1; then
+            HAS_CHANGES="true"
+            echo "has-changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "$PLAN_JSON" | jq -r '
             if .resource_changes then
               (if (.resource_changes | map(select(.change.actions | index("create"))) | length) > 0 then
                 "**Resources to add:** \(.resource_changes | map(select(.change.actions | index("create"))) | length)\n"
@@ -145,12 +163,57 @@ jobs:
             end
           ' >> $GITHUB_STEP_SUMMARY || echo "## Terraform Plan Summary\nPlan completed. Review the plan output above for details." >> $GITHUB_STEP_SUMMARY
 
-      - name: Terraform Apply
-        id: terraform-apply
-        if: ${{ !inputs.plan-only }}
+      - name: Upload plan file
+        if: steps.terraform-plan.outputs.has-changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: ${{ inputs.working-directory }}/${{ steps.terraform-plan.outputs.plan-file }}
+          retention-days: 1
+
+  terraform-apply:
+    if: ${{ !inputs.plan-only && needs.terraform-plan.outputs.has-changes == 'true' }}
+    needs: terraform-plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment != '' && inputs.environment || (null) }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.client-id }}
+          tenant-id: ${{ secrets.tenant-id }}
+          subscription-id: ${{ secrets.subscription-id }}
+
+      - name: Terraform Init
+        id: terraform-init
         working-directory: ${{ inputs.working-directory }}
         run: |
-          PLAN_FILE="${{ steps.terraform-plan.outputs.plan-file }}"
+          echo "Running: terraform init"
+          terraform init
+
+      - name: Download plan file
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: ${{ inputs.working-directory }}
+
+      - name: Terraform Apply
+        id: terraform-apply
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          PLAN_FILE="${{ needs.terraform-plan.outputs.plan-file }}"
           
           if [ ! -f "${PLAN_FILE}" ]; then
             echo "Error: Plan file not found: ${PLAN_FILE}"
@@ -170,7 +233,6 @@ jobs:
           echo "Infrastructure has been deployed using the plan: ${PLAN_FILE}" >> $GITHUB_STEP_SUMMARY
 
       - name: Terraform Output
-        if: ${{ !inputs.plan-only }}
         working-directory: ${{ inputs.working-directory }}
         run: |
           echo "## Terraform Outputs" >> $GITHUB_STEP_SUMMARY
