@@ -21,7 +21,7 @@ jobs:
       image-name: example-app
       dockerfile-path: "examples/Dockerfile.container-build-scan-publish"
       build-context: "."
-      acr-registry: "superduperregistry.azurecr.io"
+      acr-registry: "tab284526.azurecr.io"
       trivy-severity: "CRITICAL,HIGH"
       fail-on-vulnerabilities: true
       build-args: '{"ENV":"development"}'
