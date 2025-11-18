@@ -1,0 +1,196 @@
+name: Function App Package & Publish
+
+on:
+  workflow_call:
+    inputs:
+      function-app-name:
+        description: "Name of the Azure Function App"
+        required: true
+        type: string
+      package-name:
+        description: "Name for the package/zip file (default: function-app-name)"
+        required: false
+        type: string
+        default: ""
+      source-path:
+        description: "Path to the function app source code (default: .)"
+        required: false
+        type: string
+        default: "."
+      requirements-path:
+        description: "Path to requirements.txt file (default: ./requirements.txt)"
+        required: false
+        type: string
+        default: "./requirements.txt"
+      python-version:
+        description: "Python version to use (default: 3.13)"
+        required: false
+        type: string
+        default: "3.13"
+      package-tag:
+        description: "Tag for the package (default: auto-determined from branch)"
+        required: false
+        type: string
+        default: ""
+
+      # Azure Storage settings
+      storage-account-name:
+        description: "Azure Storage Account name"
+        required: true
+        type: string
+      storage-container-name:
+        description: "Azure Storage blob container name"
+        required: true
+        type: string
+      storage-resource-group:
+        description: "Resource group containing the storage account"
+        required: true
+        type: string
+
+    secrets:
+      client-id:
+        description: "Entra managed identity client ID"
+        required: true
+      tenant-id:
+        description: "Entra tenant ID"
+        required: true
+      subscription-id:
+        description: "Azure subscription ID"
+        required: true
+
+jobs:
+  package-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Determine package name
+        id: package-name
+        run: |
+          if [ -z "${{ inputs.package-name }}" ]; then
+            PACKAGE_NAME="${{ inputs.function-app-name }}"
+          else
+            PACKAGE_NAME="${{ inputs.package-name }}"
+          fi
+          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+          echo "Package name: $PACKAGE_NAME"
+
+      - name: Determine package tag
+        id: package-tag
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "${{ inputs.package-tag }}" ]; then
+            if [ "$GITHUB_REF" == "refs/heads/main" ] || [ "$GITHUB_REF" == "refs/heads/master" ]; then
+              TAG="latest"
+            else
+              TAG="$GITHUB_SHA"
+            fi
+          else
+            TAG="${{ inputs.package-tag }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Package tag: $TAG"
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.source-path }}
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "${{ inputs.requirements-path }}" ]; then
+            pip install -r ${{ inputs.requirements-path }} --target .python_packages/lib/site-packages
+          else
+            echo "Warning: requirements.txt not found at ${{ inputs.requirements-path }}"
+          fi
+
+      - name: Create deployment package
+        id: create-package
+        working-directory: ${{ inputs.source-path }}
+        run: |
+          ZIP_NAME="${{ steps.package-name.outputs.name }}-${{ steps.package-tag.outputs.tag }}.zip"
+          echo "zip-name=$ZIP_NAME" >> $GITHUB_OUTPUT
+          
+          # Create zip file excluding unnecessary files
+          zip -r "$ZIP_NAME" . \
+            -x "*.git*" \
+            -x "*.github*" \
+            -x "*.vscode*" \
+            -x "*.idea*" \
+            -x "*.pyc" \
+            -x "__pycache__/*" \
+            -x "*.pytest_cache*" \
+            -x "*.tox*" \
+            -x "*.env" \
+            -x ".env*" \
+            -x "*.zip" \
+            -x "*.log"
+          
+          echo "Created package: $ZIP_NAME"
+          ls -lh "$ZIP_NAME"
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.client-id }}
+          tenant-id: ${{ secrets.tenant-id }}
+          subscription-id: ${{ secrets.subscription-id }}
+
+      - name: Upload package to Azure Storage
+        id: upload-package
+        working-directory: ${{ inputs.source-path }}
+        run: |
+          ZIP_NAME="${{ steps.create-package.outputs.zip-name }}"
+          BLOB_NAME="$ZIP_NAME"
+          
+          echo "Uploading $ZIP_NAME to ${{ inputs.storage-container-name }} container..."
+          
+          az storage blob upload \
+            --account-name ${{ inputs.storage-account-name }} \
+            --container-name ${{ inputs.storage-container-name }} \
+            --name "$BLOB_NAME" \
+            --file "$ZIP_NAME" \
+            --overwrite \
+            --auth-mode login
+          
+          # Get the blob URL for website_run_from_package
+          BLOB_URL=$(az storage blob url \
+            --account-name ${{ inputs.storage-account-name }} \
+            --container-name ${{ inputs.storage-container-name }} \
+            --name "$BLOB_NAME" \
+            --auth-mode login \
+            --output tsv)
+          
+          echo "Package uploaded successfully!"
+          echo "Blob URL: $BLOB_URL"
+          echo "Use this URL in your Function App's website_run_from_package app setting"
+          
+          # Output the blob URL for use in other jobs/steps
+          echo "blob-url=$BLOB_URL" >> $GITHUB_OUTPUT
+          echo "blob-name=$BLOB_NAME" >> $GITHUB_OUTPUT
+
+      - name: Output package information
+        run: |
+          echo "## Package Published Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package Name:** ${{ steps.create-package.outputs.zip-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Blob Name:** ${{ steps.upload-package.outputs.blob-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Blob URL:** ${{ steps.upload-package.outputs.blob-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Storage Account:** ${{ inputs.storage-account-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Container:** ${{ inputs.storage-container-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To use this package in your Function App, set the \`website_run_from_package\` app setting to:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.upload-package.outputs.blob-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
