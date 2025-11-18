@@ -2,17 +2,12 @@ name: Example Container Build
 
 on:
   push:
-    branches: [main, develop]
-    paths:
-      - 'examples/Dockerfile.container-build-scan-publish'
-      - '.github/workflows/container-build-scan-publish-example.yml'
-      - '.github/workflows/container-build-scan-publish.yml'
-  pull_request:
     branches: [main]
     paths:
-      - 'examples/Dockerfile.container-build-scan-publish'
-      - '.github/workflows/container-build-scan-publish-example.yml'
-      - '.github/workflows/container-build-scan-publish.yml'
+      - "examples/Dockerfile.container-build-scan-publish"
+      - ".github/workflows/container-build-scan-publish-example.yml"
+      - ".github/workflows/container-build-scan-publish.yml"
+  workflow_dispatch:
 
 jobs:
   build-scan-publish-example:
@@ -26,7 +21,7 @@ jobs:
       image-name: example-app
       dockerfile-path: "examples/Dockerfile.container-build-scan-publish"
       build-context: "."
-      acr-registry: "superduperregistry.azurecr.io"
+      acr-registry: "tab284526.azurecr.io"
       trivy-severity: "CRITICAL,HIGH"
       fail-on-vulnerabilities: true
       build-args: '{"ENV":"development"}'
