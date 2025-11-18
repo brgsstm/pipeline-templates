@@ -83,7 +83,7 @@ jobs:
       - name: Terraform Format Check
         id: terraform-format
         working-directory: ${{ inputs.working-directory }}
-        continue-on-error: true
+        continue-on-error: false
         run: |
           terraform fmt -check -recursive
           echo "exit-code=$?" >> $GITHUB_OUTPUT
