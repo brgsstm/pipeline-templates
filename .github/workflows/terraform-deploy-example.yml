@@ -19,10 +19,6 @@ jobs:
     with:
       working-directory: "examples/terraform-deploy"
       terraform-version: "1.13.5"
-      azure-resource-group: "shared-storage"
-      azure-storage-account: "iaccoresharedstgem22"
-      azure-container-name: "tf-state"
-      azure-key: "terraform-deploy-example/terraform.tfstate"
       plan-only: true
     secrets:
       client-id: ${{ secrets.MI_CLIENT_ID }}
@@ -39,10 +35,6 @@ jobs:
     with:
       working-directory: "examples/terraform-deploy"
       terraform-version: "1.13.5"
-      azure-resource-group: "shared-storage"
-      azure-storage-account: "iaccoresharedstgem22"
-      azure-container-name: "tf-state"
-      azure-key: "terraform-deploy-example/terraform.tfstate"
       plan-only: false
       auto-approve: true
     secrets:

@@ -14,25 +14,6 @@ on:
         type: string
         default: "latest"
       
-      # Azure backend configuration
-      azure-resource-group:
-        description: "Azure resource group for Terraform state backend"
-        required: true
-        type: string
-      azure-storage-account:
-        description: "Azure storage account for Terraform state backend"
-        required: true
-        type: string
-      azure-container-name:
-        description: "Azure storage container for Terraform state backend"
-        required: true
-        type: string
-      azure-key:
-        description: "State file key in Azure storage (default: terraform.tfstate)"
-        required: false
-        type: string
-        default: "terraform.tfstate"
-      
       # Variable files
       var-files:
         description: "Comma-separated list of variable files (e.g., terraform.tfvars,prod.tfvars)"
@@ -96,14 +77,8 @@ jobs:
         id: terraform-init
         working-directory: ${{ inputs.working-directory }}
         run: |
-          # Configure Azure backend
-          INIT_ARGS="-backend-config=resource_group_name=${{ inputs.azure-resource-group }}"
-          INIT_ARGS="${INIT_ARGS} -backend-config=storage_account_name=${{ inputs.azure-storage-account }}"
-          INIT_ARGS="${INIT_ARGS} -backend-config=container_name=${{ inputs.azure-container-name }}"
-          INIT_ARGS="${INIT_ARGS} -backend-config=key=${{ inputs.azure-key }}"
-          
-          echo "Running: terraform init ${INIT_ARGS}"
-          terraform init ${INIT_ARGS}
+          echo "Running: terraform init"
+          terraform init
 
       - name: Terraform Format Check
         id: terraform-format
