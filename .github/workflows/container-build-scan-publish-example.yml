@@ -2,7 +2,7 @@ name: Example Container Build
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - "examples/Dockerfile.container-build-scan-publish"
       - ".github/workflows/container-build-scan-publish-example.yml"

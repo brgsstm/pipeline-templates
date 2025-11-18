@@ -2,7 +2,7 @@ name: Build and Publish Function App Artifact
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - "examples/function-app-package-publish/**"
       - ".github/workflows/function-app-package-publish-example.yml"
