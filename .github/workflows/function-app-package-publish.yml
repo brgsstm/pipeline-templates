@@ -189,7 +189,7 @@ jobs:
           echo "**Storage Account:** ${{ inputs.storage-account-name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Container:** ${{ inputs.storage-container-name }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "To use this package in your Function App, set the \`website_run_from_package\` app setting to:" >> $GITHUB_STEP_SUMMARY
+          echo "To use this package in your Function App, set the \`WEBSITE_RUN_FROM_PACKAGE\` app setting to:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.upload-package.outputs.blob-url }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
