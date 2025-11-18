@@ -8,8 +8,8 @@ terraform {
 }
 
 provider "azurerm" {
-  # subscription_id will be automatically determined from the authenticated context
-  # (Managed Identity in GitHub Actions)
+  features {}
+  subscription_id = var.subscription_id
 }
 
 resource "azurerm_resource_group" "example" {
