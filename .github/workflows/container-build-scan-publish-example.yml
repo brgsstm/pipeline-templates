@@ -3,8 +3,16 @@ name: Example Container Build
 on:
   push:
     branches: [main, develop]
+    paths:
+      - 'examples/Dockerfile.container-build-scan-publish'
+      - '.github/workflows/container-build-scan-publish-example.yml'
+      - '.github/workflows/container-build-scan-publish.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'examples/Dockerfile.container-build-scan-publish'
+      - '.github/workflows/container-build-scan-publish-example.yml'
+      - '.github/workflows/container-build-scan-publish.yml'
 
 jobs:
   build-scan-publish-example:
