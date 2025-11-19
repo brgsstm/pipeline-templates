@@ -17,6 +17,7 @@ jobs:
       id-token: write
     uses: brgsstm/pipeline-templates/.github/workflows/terraform-deploy.yml@feature/terraform-apply
     with:
+      environment: "production"
       working-directory: "examples/terraform-deploy"
       terraform-version: "1.12.2"
       plan-only: true
@@ -33,6 +34,7 @@ jobs:
       id-token: write
     uses: brgsstm/pipeline-templates/.github/workflows/terraform-deploy.yml@feature/terraform-apply
     with:
+      environment: "production"
       working-directory: "examples/terraform-deploy"
       terraform-version: "1.13.5"
       plan-only: false
