@@ -27,6 +27,12 @@ Packages Python-based Azure Functions into a zip file and publishes it to an Azu
 
 **Template:** `.github/workflows/function-app-package-publish.yml`
 
+### 3. [Terraform Deploy Infrastructure](docs/terraform-deploy.md)
+
+Deploys infrastructure using Terraform with support for plan and apply operations, backend configuration, and variable management.
+
+**Template:** `.github/workflows/terraform-deploy.yml`
+
 ## Authentication
 
 All templates use **Entra Managed Identity** for authentication. This approach:
@@ -52,6 +58,9 @@ Ensure your Managed Identity has:
 2. Appropriate IAM roles:
    - **Container templates**: `AcrPush` role on the Azure Container Registry
    - **Function App templates**: `Storage Blob Data Contributor` role on the Azure Storage Account
+   - **Terraform templates**: 
+     - `Storage Blob Data Contributor` role on the storage account (for Azure backends)
+     - Appropriate roles for resources being deployed (e.g., `Contributor` on target resource groups)
 
 ## Examples
 
